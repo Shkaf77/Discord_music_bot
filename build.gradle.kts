@@ -8,15 +8,17 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
+    maven("https://maven.lavalink.dev/releases")
 }
 
 dependencies {
     testImplementation(kotlin("test"))
 
-    implementation("net.dv8tion:JDA:5.6.1")
+    implementation("net.dv8tion:JDA:6.4.2")
+    implementation("dev.arbjerg:lavalink-client:3.4.0")
+
     implementation("io.github.cdimascio:dotenv-kotlin:6.5.1")
     implementation("org.slf4j:slf4j-simple:2.0.17")
-    implementation("dev.arbjerg:lavalink-client:3.4.0")
 }
 
 kotlin {
@@ -29,9 +31,4 @@ tasks.test {
 
 application {
     mainClass.set("MainKt")
-}
-
-repositories {
-    mavenCentral()
-    maven("https://maven.lavalink.dev/releases")
 }
