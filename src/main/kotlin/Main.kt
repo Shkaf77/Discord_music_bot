@@ -40,15 +40,12 @@ fun main() {
             .enableIntents(GatewayIntent.GUILD_VOICE_STATES)
             .setVoiceDispatchInterceptor(
                 JDAVoiceUpdateListener(lavalinkClient)
-            )
-            .addEventListeners(BotCommands())
-            .build()
+            ).addEventListeners(BotCommands()).build()
 
     jda.awaitReady()
 
     jda.guilds.forEach { guild ->
-        guild.updateCommands()
-            .addCommands(
+        guild.updateCommands().addCommands(
                 Commands.slash("ping", "Check if bot is alive"),
 
                 Commands.slash(
@@ -64,15 +61,13 @@ fun main() {
                 Commands.slash(
                     "play",
                     "Play from YouTube"
-                )
-                    .addOption(
+                ).addOption(
                         OptionType.STRING,
                         "query",
                         "YouTube link or search",
                         true
                     )
-            )
-            .queue()
+            ).queue()
     }
 
     println("Bot started with Lavalink")
@@ -95,46 +90,34 @@ class BotCommands : ListenerAdapter() {
         event: SlashCommandInteractionEvent
     ) {
 
-        val channel =
-            event.member
-                ?.voiceState
-                ?.channel
+        val channel = event.member?.voiceState?.channel
 
         if (channel == null) {
             event.reply(
                 "Join voice channel first."
-            )
-                .setEphemeral(true)
-                .queue()
+            ).setEphemeral(true).queue()
 
             return
         }
 
-        event.jda
-            .directAudioController
-            .connect(channel)
+        event.jda.directAudioController.connect(channel)
 
         event.reply(
             "Joined ${channel.name}"
-        )
-            .queue()
+        ).queue()
     }
 
     private fun leave(
         event: SlashCommandInteractionEvent
     ) {
 
-        val guild =
-            event.guild ?: return
+        val guild = event.guild ?: return
 
-        event.jda
-            .directAudioController
-            .disconnect(guild)
+        event.jda.directAudioController.disconnect(guild)
 
         event.reply(
             "Disconnected."
-        )
-            .queue()
+        ).queue()
     }
 
     private fun play(
@@ -143,21 +126,14 @@ class BotCommands : ListenerAdapter() {
 
         event.deferReply().queue()
 
-        val guild =
-            event.guild ?: return
+        val guild = event.guild ?: return
 
-        val channel =
-            event.member
-                ?.voiceState
-                ?.channel
+        val channel = event.member?.voiceState?.channel
 
         if (channel == null) {
-
-            event.hook
-                .sendMessage(
+            event.hook.sendMessage(
                     "Join voice channel first."
-                )
-                .queue()
+                ).queue()
 
             return
         }
@@ -175,23 +151,21 @@ class BotCommands : ListenerAdapter() {
         val raw =
             event.getOption(
                 "query"
-            )!!
-                .asString
+            )!!.asString
 
         val query =
-            if (raw.startsWith("http"))
+            if (raw.startsWith("http")) {
                 raw
-            else
+            } else {
                 "ytsearch:$raw"
+            }
 
-        val link =
-            lavalinkClient
-                .getOrCreateLink(
+        val link = lavalinkClient.getOrCreateLink(
                     guild.idLong
                 )
 
-        link.loadItem(query)
-            .subscribe { result ->
+        link.loadItem(query).subscribe {
+            result ->
 
                 val track =
                     when (result) {
@@ -205,37 +179,29 @@ class BotCommands : ListenerAdapter() {
                         is PlaylistLoaded ->
                             result.tracks.firstOrNull()
 
-                        else ->
-                            null
+                        else -> null
                     }
 
                 if (track == null) {
 
-                    event.hook
-                        .sendMessage(
+                    event.hook.sendMessage(
                             "No track found."
-                        )
-                        .queue()
+                        ).queue()
 
                     return@subscribe
                 }
 
-                val player =
-                    link.createOrUpdatePlayer()
+                val player = link.createOrUpdatePlayer()
 
                 player.setVolume(100)
 
                 player.setPaused(false)
 
-                player
-                    .setTrack(track)
-                    .subscribe {
+                player.setTrack(track).subscribe {
 
-                        event.hook
-                            .sendMessage(
+                        event.hook.sendMessage(
                                 "Now playing: ${track.info.title}"
-                            )
-                            .queue()
+                            ).queue()
                     }
             }
     }
