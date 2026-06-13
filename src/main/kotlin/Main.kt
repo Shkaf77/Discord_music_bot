@@ -11,8 +11,11 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.interactions.commands.OptionType
 import net.dv8tion.jda.api.interactions.commands.build.Commands
 import net.dv8tion.jda.api.requests.GatewayIntent
+import dev.arbjerg.lavalink.client.event.TrackEndEvent
 
 lateinit var lavalinkClient: LavalinkClient
+val musicQueues = mutableMapOf<Long, MusicQueue>()
+val activePlayers = mutableSetOf<Long>()
 
 fun main() {
     val env = Dotenv.load()
@@ -34,6 +37,24 @@ fun main() {
             .setPassword("youshallnotpass")
             .build()
     )
+
+    lavalinkClient.on(TrackEndEvent::class.java).subscribe { event ->
+        val queue = musicQueues[event.guildId]
+        val nextTrack = queue?.next()
+
+        if (nextTrack == null) {
+            activePlayers.remove(event.guildId)
+            return@subscribe
+        }
+
+        val link = lavalinkClient.getOrCreateLink(event.guildId)
+        val player = link.createOrUpdatePlayer()
+
+        player.setVolume(100)
+        player.setPaused(false)
+
+        player.setTrack(nextTrack).subscribe()
+    }
 
     val jda =
         JDABuilder.createDefault(discordToken)
@@ -127,7 +148,6 @@ class BotCommands : ListenerAdapter() {
         event.deferReply().queue()
 
         val guild = event.guild ?: return
-
         val channel = event.member?.voiceState?.channel
 
         if (channel == null) {
@@ -183,26 +203,38 @@ class BotCommands : ListenerAdapter() {
                     }
 
                 if (track == null) {
-
-                    event.hook.sendMessage(
-                            "No track found."
-                        ).queue()
-
+                    event.hook.sendMessage("No track found.").queue()
                     return@subscribe
+                }
+
+                val playableTrack = track
+
+                val queue = musicQueues.getOrPut(guild.idLong) {
+                    MusicQueue()
                 }
 
                 val player = link.createOrUpdatePlayer()
 
                 player.setVolume(100)
 
-                player.setPaused(false)
+                if (!activePlayers.contains(guild.idLong)) {
+                    player.setPaused(false)
 
-                player.setTrack(track).subscribe {
+                    player.setTrack(playableTrack)
+                        .subscribe {
+                            activePlayers.add(guild.idLong)
 
-                        event.hook.sendMessage(
-                                "Now playing: ${track.info.title}"
+                            event.hook.sendMessage(
+                                "Now playing: ${playableTrack.info.title}"
                             ).queue()
-                    }
-            }
+                        }
+                } else {
+                    queue.add(playableTrack)
+
+                    event.hook.sendMessage(
+                        "Added to queue: ${playableTrack.info.title}"
+                    ).queue()
+                }
+        }
     }
 }
