@@ -92,6 +92,14 @@ fun main() {
                     "Resume current track"
                 ),
 
+                Commands.slash("volume", "Set player volume")
+                    .addOption(
+                        OptionType.INTEGER,
+                        "level",
+                        "Volume from 1 to 100",
+                        true
+                    ),
+
                 Commands.slash(
                     "join",
                     "Join your voice channel"
@@ -131,6 +139,7 @@ class BotCommands : ListenerAdapter() {
             "skip" -> skip(event)
             "pause" -> pause(event)
             "resume" -> resume(event)
+            "volume" -> volume(event)
         }
     }
 
@@ -325,7 +334,19 @@ class BotCommands : ListenerAdapter() {
                         .createOrUpdatePlayer()
 
         player.setPaused(false).subscribe {
-            event.reply("Resume.").queue()
+            event.reply("Resumed.").queue()
+        }
+    }
+
+    private fun volume(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val level = event.getOption("level")!!.asInt.coerceIn(1, 100)
+        val player = lavalinkClient
+                .getOrCreateLink(guild.idLong)
+                .createOrUpdatePlayer()
+
+        player.setVolume(level).subscribe {
+            event.reply("Volume set to $level%.").queue()
         }
     }
 }
