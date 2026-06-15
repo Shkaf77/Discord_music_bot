@@ -78,6 +78,11 @@ fun main() {
                 ),
 
                 Commands.slash(
+                    "skip",
+                    "Skip current track"
+                ),
+
+                Commands.slash(
                     "join",
                     "Join your voice channel"
                 ),
@@ -113,6 +118,7 @@ class BotCommands : ListenerAdapter() {
             "leave" -> leave(event)
             "play" -> play(event)
             "queue" -> showQueue(event)
+            "skip" -> skip(event)
         }
     }
 
@@ -265,5 +271,27 @@ class BotCommands : ListenerAdapter() {
                 .joinToString("\n")
 
         event.reply("Current queue: \n$message").queue()
+    }
+
+    private fun skip(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val queue = musicQueues[guild.idLong]
+        val nextTrack = queue?.next()
+        val link = lavalinkClient.getOrCreateLink(guild.idLong)
+        val player = link.createOrUpdatePlayer()
+
+        if (nextTrack == null) {
+            activePlayers.remove(guild.idLong)
+            player.setTrack(null).subscribe {
+                event.reply("Skipped. Queue is empty").queue()
+            }
+            return
+        }
+
+        val trackToPlay = nextTrack
+
+        player.setTrack(trackToPlay).subscribe {
+            event.reply("Skipped. Now playing: ${trackToPlay.info.title}").queue()
+        }
     }
 }
