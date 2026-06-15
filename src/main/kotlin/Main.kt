@@ -67,7 +67,15 @@ fun main() {
 
     jda.guilds.forEach { guild ->
         guild.updateCommands().addCommands(
-                Commands.slash("ping", "Check if bot is alive"),
+                Commands.slash(
+                    "ping",
+                    "Check if bot is alive"
+                ),
+
+                Commands.slash(
+                    "queue",
+                    "Show current queue"
+                ),
 
                 Commands.slash(
                     "join",
@@ -104,6 +112,7 @@ class BotCommands : ListenerAdapter() {
             "join" -> join(event)
             "leave" -> leave(event)
             "play" -> play(event)
+            "queue" -> showQueue(event)
         }
     }
 
@@ -236,5 +245,25 @@ class BotCommands : ListenerAdapter() {
                     ).queue()
                 }
         }
+    }
+
+    private fun showQueue(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val queue = musicQueues[guild.idLong]
+
+        if (queue == null) {
+            event.reply("Queue is empty.").queue()
+            return
+        }
+
+        val message =
+            queue.list()
+                .take(10)
+                .mapIndexed { index, track ->
+                    "${index + 1}. ${track.info.title}"
+                }
+                .joinToString("\n")
+
+        event.reply("Current queue: \n$message").queue()
     }
 }
