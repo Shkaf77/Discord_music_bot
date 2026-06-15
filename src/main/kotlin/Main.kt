@@ -16,6 +16,7 @@ import dev.arbjerg.lavalink.client.event.TrackEndEvent
 lateinit var lavalinkClient: LavalinkClient
 val musicQueues = mutableMapOf<Long, MusicQueue>()
 val activePlayers = mutableSetOf<Long>()
+val currentTracks = mutableMapOf<Long, String>()
 
 fun main() {
     val env = Dotenv.load()
@@ -44,6 +45,7 @@ fun main() {
 
         if (nextTrack == null) {
             activePlayers.remove(event.guildId)
+            currentTracks.remove(event.guildId)
             return@subscribe
         }
 
@@ -53,7 +55,9 @@ fun main() {
         player.setVolume(100)
         player.setPaused(false)
 
-        player.setTrack(nextTrack).subscribe()
+        player.setTrack(nextTrack).subscribe {
+            currentTracks[event.guildId] = nextTrack.info.title
+        }
     }
 
     val jda =
@@ -67,59 +71,61 @@ fun main() {
 
     jda.guilds.forEach { guild ->
         guild.updateCommands().addCommands(
-                Commands.slash(
-                    "ping",
-                    "Check if bot is alive"
+            Commands.slash(
+                "ping",
+                "Check if bot is alive"
+            ),
+
+            Commands.slash(
+                "queue",
+                "Show current queue"
+            ),
+
+            Commands.slash(
+                "skip",
+                "Skip current track"
+            ),
+
+            Commands.slash(
+                "pause",
+                "Pause current track"
+            ),
+
+            Commands.slash(
+                "resume",
+                "Resume current track"
+            ),
+
+            Commands.slash("volume", "Set player volume")
+                .addOption(
+                    OptionType.INTEGER,
+                    "level",
+                    "Volume from 1 to 100",
+                    true
                 ),
 
-                Commands.slash(
-                    "queue",
-                    "Show current queue"
-                ),
+            Commands.slash("nowplaying", "Show current track"),
 
-                Commands.slash(
-                    "skip",
-                    "Skip current track"
-                ),
+            Commands.slash(
+                "join",
+                "Join your voice channel"
+            ),
 
-                Commands.slash(
-                    "pause",
-                    "Pause current track"
-                ),
+            Commands.slash(
+                "leave",
+                "Leave voice channel"
+            ),
 
-                Commands.slash(
-                    "resume",
-                    "Resume current track"
-                ),
-
-                Commands.slash("volume", "Set player volume")
-                    .addOption(
-                        OptionType.INTEGER,
-                        "level",
-                        "Volume from 1 to 100",
-                        true
-                    ),
-
-                Commands.slash(
-                    "join",
-                    "Join your voice channel"
-                ),
-
-                Commands.slash(
-                    "leave",
-                    "Leave voice channel"
-                ),
-
-                Commands.slash(
-                    "play",
-                    "Play from YouTube"
-                ).addOption(
-                        OptionType.STRING,
-                        "query",
-                        "YouTube link or search",
-                        true
-                    )
-            ).queue()
+            Commands.slash(
+                "play",
+                "Play from YouTube"
+            ).addOption(
+                OptionType.STRING,
+                "query",
+                "YouTube link or search",
+                true
+            )
+        ).queue()
     }
 
     println("Bot started with Lavalink")
@@ -140,6 +146,7 @@ class BotCommands : ListenerAdapter() {
             "pause" -> pause(event)
             "resume" -> resume(event)
             "volume" -> volume(event)
+            "nowplaying" -> nowPlaying(event)
         }
     }
 
@@ -188,8 +195,8 @@ class BotCommands : ListenerAdapter() {
 
         if (channel == null) {
             event.hook.sendMessage(
-                    "Join voice channel first."
-                ).queue()
+                "Join voice channel first."
+            ).queue()
 
             return
         }
@@ -217,60 +224,62 @@ class BotCommands : ListenerAdapter() {
             }
 
         val link = lavalinkClient.getOrCreateLink(
-                    guild.idLong
-                )
+            guild.idLong
+        )
 
         link.loadItem(query).subscribe {
-            result ->
+                result ->
 
-                val track =
-                    when (result) {
+            val track =
+                when (result) {
 
-                        is TrackLoaded ->
-                            result.track
+                    is TrackLoaded ->
+                        result.track
 
-                        is SearchResult ->
-                            result.tracks.firstOrNull()
+                    is SearchResult ->
+                        result.tracks.firstOrNull()
 
-                        is PlaylistLoaded ->
-                            result.tracks.firstOrNull()
+                    is PlaylistLoaded ->
+                        result.tracks.firstOrNull()
 
-                        else -> null
+                    else -> null
+                }
+
+            if (track == null) {
+                event.hook.sendMessage("No track found.").queue()
+                return@subscribe
+            }
+
+            val playableTrack = track
+
+            val queue = musicQueues.getOrPut(guild.idLong) {
+                MusicQueue()
+            }
+
+            val player = link.createOrUpdatePlayer()
+
+            player.setVolume(100)
+
+            if (!activePlayers.contains(guild.idLong)) {
+                player.setPaused(false)
+
+                player.setTrack(playableTrack)
+                    .subscribe {
+                        currentTracks[guild.idLong] = playableTrack.info.title
+
+                        activePlayers.add(guild.idLong)
+
+                        event.hook.sendMessage(
+                            "Now playing: ${playableTrack.info.title}"
+                        ).queue()
                     }
+            } else {
+                queue.add(playableTrack)
 
-                if (track == null) {
-                    event.hook.sendMessage("No track found.").queue()
-                    return@subscribe
-                }
-
-                val playableTrack = track
-
-                val queue = musicQueues.getOrPut(guild.idLong) {
-                    MusicQueue()
-                }
-
-                val player = link.createOrUpdatePlayer()
-
-                player.setVolume(100)
-
-                if (!activePlayers.contains(guild.idLong)) {
-                    player.setPaused(false)
-
-                    player.setTrack(playableTrack)
-                        .subscribe {
-                            activePlayers.add(guild.idLong)
-
-                            event.hook.sendMessage(
-                                "Now playing: ${playableTrack.info.title}"
-                            ).queue()
-                        }
-                } else {
-                    queue.add(playableTrack)
-
-                    event.hook.sendMessage(
-                        "Added to queue: ${playableTrack.info.title}"
-                    ).queue()
-                }
+                event.hook.sendMessage(
+                    "Added to queue: ${playableTrack.info.title}"
+                ).queue()
+            }
         }
     }
 
@@ -303,6 +312,7 @@ class BotCommands : ListenerAdapter() {
 
         if (nextTrack == null) {
             activePlayers.remove(guild.idLong)
+            currentTracks.remove(guild.idLong)
             player.setTrack(null).subscribe {
                 event.reply("Skipped. Queue is empty").queue()
             }
@@ -312,6 +322,8 @@ class BotCommands : ListenerAdapter() {
         val trackToPlay = nextTrack
 
         player.setTrack(trackToPlay).subscribe {
+            currentTracks[guild.idLong] = trackToPlay.info.title
+
             event.reply("Skipped. Now playing: ${trackToPlay.info.title}").queue()
         }
     }
@@ -319,8 +331,8 @@ class BotCommands : ListenerAdapter() {
     private fun pause(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
         val player = lavalinkClient
-                        .getOrCreateLink(guild.idLong)
-                        .createOrUpdatePlayer()
+            .getOrCreateLink(guild.idLong)
+            .createOrUpdatePlayer()
 
         player.setPaused(true).subscribe{
             event.reply("Paused.").queue()
@@ -330,8 +342,8 @@ class BotCommands : ListenerAdapter() {
     private fun resume(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
         val player = lavalinkClient
-                        .getOrCreateLink(guild.idLong)
-                        .createOrUpdatePlayer()
+            .getOrCreateLink(guild.idLong)
+            .createOrUpdatePlayer()
 
         player.setPaused(false).subscribe {
             event.reply("Resumed.").queue()
@@ -342,11 +354,23 @@ class BotCommands : ListenerAdapter() {
         val guild = event.guild ?: return
         val level = event.getOption("level")!!.asInt.coerceIn(1, 100)
         val player = lavalinkClient
-                .getOrCreateLink(guild.idLong)
-                .createOrUpdatePlayer()
+            .getOrCreateLink(guild.idLong)
+            .createOrUpdatePlayer()
 
         player.setVolume(level).subscribe {
             event.reply("Volume set to $level%.").queue()
         }
+    }
+
+    private fun nowPlaying(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val title = currentTracks[guild.idLong]
+
+        if (title == null) {
+            event.reply("Nothing is playing.").queue()
+            return
+        }
+
+        event.reply("Now playing: $title").queue()
     }
 }
