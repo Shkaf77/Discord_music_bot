@@ -83,6 +83,16 @@ fun main() {
                 ),
 
                 Commands.slash(
+                    "pause",
+                    "Pause current track"
+                ),
+
+                Commands.slash(
+                    "resume",
+                    "Resume current track"
+                ),
+
+                Commands.slash(
                     "join",
                     "Join your voice channel"
                 ),
@@ -119,6 +129,8 @@ class BotCommands : ListenerAdapter() {
             "play" -> play(event)
             "queue" -> showQueue(event)
             "skip" -> skip(event)
+            "pause" -> pause(event)
+            "resume" -> resume(event)
         }
     }
 
@@ -292,6 +304,28 @@ class BotCommands : ListenerAdapter() {
 
         player.setTrack(trackToPlay).subscribe {
             event.reply("Skipped. Now playing: ${trackToPlay.info.title}").queue()
+        }
+    }
+
+    private fun pause(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val player = lavalinkClient
+                        .getOrCreateLink(guild.idLong)
+                        .createOrUpdatePlayer()
+
+        player.setPaused(true).subscribe{
+            event.reply("Paused.").queue()
+        }
+    }
+
+    private fun resume(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val player = lavalinkClient
+                        .getOrCreateLink(guild.idLong)
+                        .createOrUpdatePlayer()
+
+        player.setPaused(false).subscribe {
+            event.reply("Resume.").queue()
         }
     }
 }
