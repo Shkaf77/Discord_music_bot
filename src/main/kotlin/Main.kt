@@ -12,11 +12,13 @@ import net.dv8tion.jda.api.interactions.commands.OptionType
 import net.dv8tion.jda.api.interactions.commands.build.Commands
 import net.dv8tion.jda.api.requests.GatewayIntent
 import dev.arbjerg.lavalink.client.event.TrackEndEvent
+import dev.arbjerg.lavalink.protocol.v4.Playlist
 
 lateinit var lavalinkClient: LavalinkClient
 val musicQueues = mutableMapOf<Long, MusicQueue>()
 val activePlayers = mutableSetOf<Long>()
 val currentTracks = mutableMapOf<Long, String>()
+val playlistBoxes = mutableMapOf<Long, PlaylistBox>()
 
 fun main() {
     val env = Dotenv.load()
@@ -40,8 +42,16 @@ fun main() {
     )
 
     lavalinkClient.on(TrackEndEvent::class.java).subscribe { event ->
-        val queue = musicQueues[event.guildId]
-        val nextTrack = queue?.next()
+        val box = playlistBoxes[event.guildId]
+        val boxTrack = box?.next()
+
+        val nextTrack =
+            if (boxTrack != null) {
+                boxTrack
+            } else {
+                val queue = musicQueues[event.guildId]
+                queue?.next()
+            }
 
         if (nextTrack == null) {
             activePlayers.remove(event.guildId)
@@ -106,6 +116,30 @@ fun main() {
 
             Commands.slash("nowplaying", "Show current track"),
 
+            Commands.slash("createplaylist", "Create playlist inside the box")
+                .addOption(
+                    OptionType.STRING,
+                    "name",
+                    "Playlist name",
+                    true
+                ),
+
+            Commands.slash("addboxtrack", "Add track to playlist inside the box")
+                .addOption(
+                    OptionType.STRING,
+                    "playlist",
+                    "Playlist name",
+                    true
+                )
+                .addOption(
+                    OptionType.STRING,
+                    "link",
+                    "YouTube or YouTube Music track link",
+                    true
+                ),
+
+            Commands.slash("startbox", "Start round-robin box playback"),
+
             Commands.slash(
                 "join",
                 "Join your voice channel"
@@ -128,7 +162,7 @@ fun main() {
         ).queue()
     }
 
-    println("Bot started with Lavalink")
+    println("Bot started")
 }
 
 class BotCommands : ListenerAdapter() {
@@ -147,6 +181,9 @@ class BotCommands : ListenerAdapter() {
             "resume" -> resume(event)
             "volume" -> volume(event)
             "nowplaying" -> nowPlaying(event)
+            "createplaylist" -> createPlaylist(event)
+            "addboxtrack" -> addBoxTrack(event)
+            "startbox" -> startBox(event)
         }
     }
 
@@ -372,5 +409,115 @@ class BotCommands : ListenerAdapter() {
         }
 
         event.reply("Now playing: $title").queue()
+    }
+
+    private fun createPlaylist(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val name = event.getOption("name")!!.asString.trim()
+
+        val box = playlistBoxes.getOrPut(guild.idLong) {
+            PlaylistBox()
+        }
+
+        val created = box.createPlaylist(name)
+
+        if (!created) {
+            event.reply("Playlist already exists: $name").queue()
+            return
+        }
+
+        event.reply("Playlist created: $name").queue()
+    }
+
+    private fun addBoxTrack(event: SlashCommandInteractionEvent) {
+        event.deferReply().queue()
+
+        val guild = event.guild ?: return
+        val playlistName = event.getOption("playlist")!!.asString.trim()
+        val rawLink = event.getOption("link")!!.asString.trim()
+
+        val query =
+            if (rawLink.startsWith("http")) {
+                rawLink
+            } else {
+                "ytsearch:$rawLink"
+            }
+
+        val box = playlistBoxes.getOrPut(guild.idLong) {
+            PlaylistBox()
+        }
+
+        val link = lavalinkClient.getOrCreateLink(guild.idLong)
+
+        link.loadItem(query).subscribe { result ->
+            val track =
+                when (result) {
+                    is TrackLoaded -> result.track
+                    is SearchResult -> result.tracks.firstOrNull()
+                    is PlaylistLoaded -> result.tracks.firstOrNull()
+                    else -> null
+                }
+
+            if (track == null) {
+                event.hook.sendMessage("No track found.").queue()
+                return@subscribe
+            }
+
+            val added = box.addTrack(playlistName, track)
+
+            if (!added) {
+                event.hook.sendMessage("Playlist not found: $playlistName").queue()
+                return@subscribe
+            }
+
+            event.hook.sendMessage(
+                "Added to $playlistName: ${track.info.title}"
+            ).queue()
+        }
+    }
+
+    private fun startBox(event: SlashCommandInteractionEvent) {
+        event.deferReply().queue()
+
+        val guild = event.guild ?: return
+        val channel = event.member?.voiceState?.channel
+
+        if (channel == null) {
+            event.hook.sendMessage("Join voice channel first.").queue()
+            return
+        }
+
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.hook.sendMessage("Box is empty.").queue()
+            return
+        }
+
+        val track = box.next()
+
+        if (track == null) {
+            event.hook.sendMessage("No tracks available in box.").queue()
+            return
+        }
+
+        if (!guild.selfMember.voiceState!!.inAudioChannel()) {
+            event.jda.directAudioController.connect(channel)
+        }
+
+        val link = lavalinkClient.getOrCreateLink(guild.idLong)
+        val player = link.createOrUpdatePlayer()
+
+        player.setVolume(100)
+        player.setPaused(false)
+
+        player.setTrack(track).subscribe {
+            activePlayers.add(guild.idLong)
+            currentTracks[guild.idLong] = track.info.title
+
+            event.hook.sendMessage(
+                "Box started. Now playing: ${track.info.title}"
+            ).queue()
+        }
     }
 }
