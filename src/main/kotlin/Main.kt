@@ -144,6 +144,14 @@ fun main() {
 
             Commands.slash("stopbox", "Stop and clear playlist box"),
 
+            Commands.slash("removeplaylist", "Remove playlist from box")
+                .addOption(
+                    OptionType.STRING,
+                    "name",
+                    "Playlist name",
+                    true
+                ),
+
             Commands.slash(
                 "join",
                 "Join your voice channel"
@@ -190,6 +198,7 @@ class BotCommands : ListenerAdapter() {
             "startbox" -> startBox(event)
             "boxstatus" -> boxStatus(event)
             "stopbox" -> stopBox(event)
+            "removeplaylist" -> removePlaylist(event)
         }
     }
 
@@ -567,5 +576,25 @@ class BotCommands : ListenerAdapter() {
         player.setTrack(null).subscribe {
             event.reply("Box stopped and cleared.").queue()
         }
+    }
+
+    private fun removePlaylist(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val name = event.getOption("name")!!.asString
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        val removed = box.removePlaylist(name)
+
+        if (!removed) {
+            event.reply("Playlist not found.").queue()
+            return
+        }
+
+        event.reply("Removed playlist: $name").queue()
     }
 }

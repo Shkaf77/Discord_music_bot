@@ -72,4 +72,19 @@ class PlaylistBox {
             "$name ($size tracks)"
         }
     }
+
+    fun removePlaylist(name: String): Boolean {
+        if (!playlists.containsKey(name)) {
+            return false
+        }
+
+        playlists.remove(name)
+        playlistOrder.remove(name)
+
+        if (currentPlaylist >= playlistOrder.size) {
+            currentPlaylist = 0
+        }
+
+        return true
+    }
 }
