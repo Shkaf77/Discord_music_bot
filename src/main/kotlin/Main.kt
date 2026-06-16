@@ -12,7 +12,6 @@ import net.dv8tion.jda.api.interactions.commands.OptionType
 import net.dv8tion.jda.api.interactions.commands.build.Commands
 import net.dv8tion.jda.api.requests.GatewayIntent
 import dev.arbjerg.lavalink.client.event.TrackEndEvent
-import dev.arbjerg.lavalink.protocol.v4.Playlist
 
 lateinit var lavalinkClient: LavalinkClient
 val musicQueues = mutableMapOf<Long, MusicQueue>()
@@ -152,6 +151,8 @@ fun main() {
                     true
                 ),
 
+            Commands.slash("boxqueue", "Show upcoming tracks from box"),
+
             Commands.slash(
                 "join",
                 "Join your voice channel"
@@ -199,6 +200,7 @@ class BotCommands : ListenerAdapter() {
             "boxstatus" -> boxStatus(event)
             "stopbox" -> stopBox(event)
             "removeplaylist" -> removePlaylist(event)
+            "boxqueue" -> boxQueue(event)
         }
     }
 
@@ -279,8 +281,7 @@ class BotCommands : ListenerAdapter() {
             guild.idLong
         )
 
-        link.loadItem(query).subscribe {
-                result ->
+        link.loadItem(query).subscribe { result ->
 
             val track =
                 when (result) {
@@ -386,7 +387,7 @@ class BotCommands : ListenerAdapter() {
             .getOrCreateLink(guild.idLong)
             .createOrUpdatePlayer()
 
-        player.setPaused(true).subscribe{
+        player.setPaused(true).subscribe {
             event.reply("Paused.").queue()
         }
     }
@@ -596,5 +597,28 @@ class BotCommands : ListenerAdapter() {
         }
 
         event.reply("Removed playlist: $name").queue()
+    }
+
+    private fun boxQueue(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        val preview = box.preview(10)
+
+        if (preview.isEmpty()) {
+            event.reply("Box queue is empty.").queue()
+            return
+        }
+
+        val message = preview.mapIndexed { index, item ->
+            "${index + 1}. $item"
+        }.joinToString("\n")
+
+        event.reply("Upcoming box tracks:\n$message").queue()
     }
 }

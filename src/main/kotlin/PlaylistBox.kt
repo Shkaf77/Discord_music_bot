@@ -87,4 +87,44 @@ class PlaylistBox {
 
         return true
     }
+
+    fun preview(limit: Int): List<String> {
+        val result = mutableListOf<String>()
+
+        if (playlistOrder.isEmpty()) {
+            return result
+        }
+
+        val positions = mutableMapOf<String, Int>()
+
+        playlistOrder.forEach { name ->
+            positions[name] = 0
+        }
+
+        var playlistIndex = currentPlaylist
+        var attemptsWithoutTrack = 0
+
+        while (result.size < limit && attemptsWithoutTrack < playlistOrder.size) {
+            if (playlistIndex >= playlistOrder.size) {
+                playlistIndex = 0
+            }
+
+            val playlistName = playlistOrder[playlistIndex]
+            val playlist = playlists[playlistName]
+            val trackIndex = positions[playlistName] ?: 0
+
+            if (playlist != null && trackIndex < playlist.size) {
+                val track = playlist[trackIndex]
+                result.add("$playlistName: ${track.info.title}")
+                positions[playlistName] = trackIndex + 1
+                attemptsWithoutTrack = 0
+            } else {
+                attemptsWithoutTrack++
+            }
+
+            playlistIndex++
+        }
+
+        return result
+    }
 }
