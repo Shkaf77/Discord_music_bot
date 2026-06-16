@@ -140,6 +140,10 @@ fun main() {
 
             Commands.slash("startbox", "Start round-robin box playback"),
 
+            Commands.slash("boxstatus", "Show playlist box status"),
+
+            Commands.slash("stopbox", "Stop and clear playlist box"),
+
             Commands.slash(
                 "join",
                 "Join your voice channel"
@@ -184,6 +188,8 @@ class BotCommands : ListenerAdapter() {
             "createplaylist" -> createPlaylist(event)
             "addboxtrack" -> addBoxTrack(event)
             "startbox" -> startBox(event)
+            "boxstatus" -> boxStatus(event)
+            "stopbox" -> stopBox(event)
         }
     }
 
@@ -518,6 +524,48 @@ class BotCommands : ListenerAdapter() {
             event.hook.sendMessage(
                 "Box started. Now playing: ${track.info.title}"
             ).queue()
+        }
+    }
+
+    private fun boxStatus(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        val status = box.status()
+
+        if (status.isEmpty()) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        event.reply("Box status:\n${status.joinToString("\n")}").queue()
+    }
+
+    private fun stopBox(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is already empty.").queue()
+            return
+        }
+
+        box.clear()
+        playlistBoxes.remove(guild.idLong)
+        activePlayers.remove(guild.idLong)
+        currentTracks.remove(guild.idLong)
+
+        val player = lavalinkClient
+            .getOrCreateLink(guild.idLong)
+            .createOrUpdatePlayer()
+
+        player.setTrack(null).subscribe {
+            event.reply("Box stopped and cleared.").queue()
         }
     }
 }

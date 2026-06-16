@@ -65,4 +65,11 @@ class PlaylistBox {
         playlistOrder.clear()
         currentPlaylist = 0
     }
+
+    fun status(): List<String> {
+        return playlistOrder.map { name ->
+            val size = playlists[name]?.size ?: 0
+            "$name ($size tracks)"
+        }
+    }
 }
