@@ -1,5 +1,6 @@
 import dev.arbjerg.lavalink.client.LavalinkClient
 import dev.arbjerg.lavalink.client.NodeOptions
+import dev.arbjerg.lavalink.client.player.LoadFailed
 import dev.arbjerg.lavalink.client.player.PlaylistLoaded
 import dev.arbjerg.lavalink.client.player.SearchResult
 import dev.arbjerg.lavalink.client.player.TrackLoaded
@@ -18,6 +19,80 @@ val musicQueues = mutableMapOf<Long, MusicQueue>()
 val activePlayers = mutableSetOf<Long>()
 val currentTracks = mutableMapOf<Long, String>()
 val playlistBoxes = mutableMapOf<Long, PlaylistBox>()
+
+fun extractVideoIdFromLink(link: String): String? {
+    val trimmed = link.trim()
+
+    if (trimmed.contains("youtu.be/")) {
+        return trimmed
+            .substringAfter("youtu.be/")
+            .substringBefore("?")
+            .substringBefore("&")
+    }
+
+    if (trimmed.contains("watch?v=")) {
+        return trimmed
+            .substringAfter("watch?v=")
+            .substringBefore("&")
+            .substringBefore("?")
+    }
+
+    return null
+}
+
+fun playBoxTrack(guildId: Long, boxTrack: BoxTrack) {
+    val directUrl = loadDirectAudioUrl(boxTrack.videoId)
+
+    if (directUrl == null) {
+        val box = playlistBoxes[guildId]
+        val nextTrack = box?.next()
+
+        if (nextTrack == null) {
+            activePlayers.remove(guildId)
+            currentTracks.remove(guildId)
+            return
+        }
+
+        playBoxTrack(guildId, nextTrack)
+        return
+    }
+
+    val link = lavalinkClient.getOrCreateLink(guildId)
+    val player = link.createOrUpdatePlayer()
+
+    link.loadItem(directUrl).subscribe { result ->
+
+        val loaded =
+            when (result) {
+                is TrackLoaded -> result.track
+                is SearchResult -> result.tracks.firstOrNull()
+                is PlaylistLoaded -> result.tracks.firstOrNull()
+                else -> null
+            }
+
+        if (loaded == null) {
+            val box = playlistBoxes[guildId]
+            val nextTrack = box?.next()
+
+            if (nextTrack == null) {
+                activePlayers.remove(guildId)
+                currentTracks.remove(guildId)
+                return@subscribe
+            }
+
+            playBoxTrack(guildId, nextTrack)
+            return@subscribe
+        }
+
+        player.setVolume(100)
+        player.setPaused(false)
+
+        player.setTrack(loaded).subscribe {
+            activePlayers.add(guildId)
+            currentTracks[guildId] = boxTrack.title
+        }
+    }
+}
 
 fun main() {
     val env = Dotenv.load()
@@ -44,13 +119,13 @@ fun main() {
         val box = playlistBoxes[event.guildId]
         val boxTrack = box?.next()
 
-        val nextTrack =
-            if (boxTrack != null) {
-                boxTrack
-            } else {
-                val queue = musicQueues[event.guildId]
-                queue?.next()
-            }
+        if (boxTrack != null) {
+            playBoxTrack(event.guildId, boxTrack)
+            return@subscribe
+        }
+
+        val queue = musicQueues[event.guildId]
+        val nextTrack = queue?.next()
 
         if (nextTrack == null) {
             activePlayers.remove(event.guildId)
@@ -80,30 +155,15 @@ fun main() {
 
     jda.guilds.forEach { guild ->
         guild.updateCommands().addCommands(
-            Commands.slash(
-                "ping",
-                "Check if bot is alive"
-            ),
+            Commands.slash("ping", "Check if bot is alive"),
 
-            Commands.slash(
-                "queue",
-                "Show current queue"
-            ),
+            Commands.slash("queue", "Show current queue"),
 
-            Commands.slash(
-                "skip",
-                "Skip current track"
-            ),
+            Commands.slash("skip", "Skip current track"),
 
-            Commands.slash(
-                "pause",
-                "Pause current track"
-            ),
+            Commands.slash("pause", "Pause current track"),
 
-            Commands.slash(
-                "resume",
-                "Resume current track"
-            ),
+            Commands.slash("resume", "Resume current track"),
 
             Commands.slash("volume", "Set player volume")
                 .addOption(
@@ -153,20 +213,73 @@ fun main() {
 
             Commands.slash("boxqueue", "Show upcoming tracks from box"),
 
-            Commands.slash(
-                "join",
-                "Join your voice channel"
-            ),
+            Commands.slash("testplaylistid", "Test playlist id extraction")
+                .addOption(
+                    OptionType.STRING,
+                    "link",
+                    "Playlist link",
+                    true
+                ),
 
-            Commands.slash(
-                "leave",
-                "Leave voice channel"
-            ),
+            Commands.slash("testplaylisturl", "Build playlist url")
+                .addOption(
+                    OptionType.STRING,
+                    "link",
+                    "Playlist link",
+                    true
+                ),
 
-            Commands.slash(
-                "play",
-                "Play from YouTube"
-            ).addOption(
+            Commands.slash("testplaylistload", "Load playlist through lavalink")
+                .addOption(
+                    OptionType.STRING,
+                    "link",
+                    "Playlist link",
+                    true
+                ),
+
+            Commands.slash("testvideoids", "Extract video ids from playlist")
+                .addOption(
+                    OptionType.STRING,
+                    "link",
+                    "Playlist link",
+                    true
+                ),
+
+            Commands.slash("addplaylist", "Add full playlist to box")
+                .addOption(
+                    OptionType.STRING,
+                    "name",
+                    "Playlist name",
+                    true
+                )
+                .addOption(
+                    OptionType.STRING,
+                    "link",
+                    "YouTube or YouTube Music playlist link",
+                    true
+                ),
+
+            Commands.slash("testtrack", "Test track direct audio")
+                .addOption(
+                    OptionType.STRING,
+                    "id",
+                    "Video id",
+                    true
+                ),
+
+            Commands.slash("shuffleplaylist", "Shuffle playlist inside the box")
+                .addOption(
+                    OptionType.STRING,
+                    "name",
+                    "Playlist name",
+                    true
+                ),
+
+            Commands.slash("join", "Join your voice channel"),
+
+            Commands.slash("leave", "Leave voice channel"),
+
+            Commands.slash("play", "Play from YouTube").addOption(
                 OptionType.STRING,
                 "query",
                 "YouTube link or search",
@@ -201,74 +314,53 @@ class BotCommands : ListenerAdapter() {
             "stopbox" -> stopBox(event)
             "removeplaylist" -> removePlaylist(event)
             "boxqueue" -> boxQueue(event)
+            "testplaylistid" -> testPlaylistId(event)
+            "testplaylisturl" -> testPlaylistUrl(event)
+            "testplaylistload" -> testPlaylistLoad(event)
+            "testvideoids" -> testVideoIds(event)
+            "addplaylist" -> addPlaylist(event)
+            "testtrack" -> testTrack(event)
+            "shuffleplaylist" -> shufflePlaylist(event)
         }
     }
 
-    private fun join(
-        event: SlashCommandInteractionEvent
-    ) {
-
+    private fun join(event: SlashCommandInteractionEvent) {
         val channel = event.member?.voiceState?.channel
 
         if (channel == null) {
-            event.reply(
-                "Join voice channel first."
-            ).setEphemeral(true).queue()
-
+            event.reply("Join voice channel first.").setEphemeral(true).queue()
             return
         }
 
         event.jda.directAudioController.connect(channel)
 
-        event.reply(
-            "Joined ${channel.name}"
-        ).queue()
+        event.reply("Joined ${channel.name}").queue()
     }
 
-    private fun leave(
-        event: SlashCommandInteractionEvent
-    ) {
-
+    private fun leave(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
 
         event.jda.directAudioController.disconnect(guild)
 
-        event.reply(
-            "Disconnected."
-        ).queue()
+        event.reply("Disconnected.").queue()
     }
 
-    private fun play(
-        event: SlashCommandInteractionEvent
-    ) {
-
+    private fun play(event: SlashCommandInteractionEvent) {
         event.deferReply().queue()
 
         val guild = event.guild ?: return
         val channel = event.member?.voiceState?.channel
 
         if (channel == null) {
-            event.hook.sendMessage(
-                "Join voice channel first."
-            ).queue()
-
+            event.hook.sendMessage("Join voice channel first.").queue()
             return
         }
 
-        if (
-            !guild.selfMember
-                .voiceState!!
-                .inAudioChannel()
-        ) {
-            event.jda
-                .directAudioController
-                .connect(channel)
+        if (!guild.selfMember.voiceState!!.inAudioChannel()) {
+            event.jda.directAudioController.connect(channel)
         }
 
-        val raw =
-            event.getOption(
-                "query"
-            )!!.asString
+        val raw = event.getOption("query")!!.asString
 
         val query =
             if (raw.startsWith("http")) {
@@ -277,24 +369,14 @@ class BotCommands : ListenerAdapter() {
                 "ytsearch:$raw"
             }
 
-        val link = lavalinkClient.getOrCreateLink(
-            guild.idLong
-        )
+        val link = lavalinkClient.getOrCreateLink(guild.idLong)
 
         link.loadItem(query).subscribe { result ->
-
             val track =
                 when (result) {
-
-                    is TrackLoaded ->
-                        result.track
-
-                    is SearchResult ->
-                        result.tracks.firstOrNull()
-
-                    is PlaylistLoaded ->
-                        result.tracks.firstOrNull()
-
+                    is TrackLoaded -> result.track
+                    is SearchResult -> result.tracks.firstOrNull()
+                    is PlaylistLoaded -> result.tracks.firstOrNull()
                     else -> null
                 }
 
@@ -302,8 +384,6 @@ class BotCommands : ListenerAdapter() {
                 event.hook.sendMessage("No track found.").queue()
                 return@subscribe
             }
-
-            val playableTrack = track
 
             val queue = musicQueues.getOrPut(guild.idLong) {
                 MusicQueue()
@@ -316,21 +396,19 @@ class BotCommands : ListenerAdapter() {
             if (!activePlayers.contains(guild.idLong)) {
                 player.setPaused(false)
 
-                player.setTrack(playableTrack)
-                    .subscribe {
-                        currentTracks[guild.idLong] = playableTrack.info.title
+                player.setTrack(track).subscribe {
+                    currentTracks[guild.idLong] = track.info.title
+                    activePlayers.add(guild.idLong)
 
-                        activePlayers.add(guild.idLong)
-
-                        event.hook.sendMessage(
-                            "Now playing: ${playableTrack.info.title}"
-                        ).queue()
-                    }
+                    event.hook.sendMessage(
+                        "Now playing: ${track.info.title}"
+                    ).queue()
+                }
             } else {
-                queue.add(playableTrack)
+                queue.add(track)
 
                 event.hook.sendMessage(
-                    "Added to queue: ${playableTrack.info.title}"
+                    "Added to queue: ${track.info.title}"
                 ).queue()
             }
         }
@@ -358,6 +436,15 @@ class BotCommands : ListenerAdapter() {
 
     private fun skip(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
+        val box = playlistBoxes[guild.idLong]
+        val boxTrack = box?.next()
+
+        if (boxTrack != null) {
+            playBoxTrack(guild.idLong, boxTrack)
+            event.reply("Skipped. Playing next box track.").queue()
+            return
+        }
+
         val queue = musicQueues[guild.idLong]
         val nextTrack = queue?.next()
         val link = lavalinkClient.getOrCreateLink(guild.idLong)
@@ -366,23 +453,26 @@ class BotCommands : ListenerAdapter() {
         if (nextTrack == null) {
             activePlayers.remove(guild.idLong)
             currentTracks.remove(guild.idLong)
+
             player.setTrack(null).subscribe {
                 event.reply("Skipped. Queue is empty").queue()
             }
+
             return
         }
 
-        val trackToPlay = nextTrack
+        player.setTrack(nextTrack).subscribe {
+            currentTracks[guild.idLong] = nextTrack.info.title
 
-        player.setTrack(trackToPlay).subscribe {
-            currentTracks[guild.idLong] = trackToPlay.info.title
-
-            event.reply("Skipped. Now playing: ${trackToPlay.info.title}").queue()
+            event.reply(
+                "Skipped. Now playing: ${nextTrack.info.title}"
+            ).queue()
         }
     }
 
     private fun pause(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
+
         val player = lavalinkClient
             .getOrCreateLink(guild.idLong)
             .createOrUpdatePlayer()
@@ -394,6 +484,7 @@ class BotCommands : ListenerAdapter() {
 
     private fun resume(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
+
         val player = lavalinkClient
             .getOrCreateLink(guild.idLong)
             .createOrUpdatePlayer()
@@ -406,6 +497,7 @@ class BotCommands : ListenerAdapter() {
     private fun volume(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
         val level = event.getOption("level")!!.asInt.coerceIn(1, 100)
+
         val player = lavalinkClient
             .getOrCreateLink(guild.idLong)
             .createOrUpdatePlayer()
@@ -446,50 +538,35 @@ class BotCommands : ListenerAdapter() {
     }
 
     private fun addBoxTrack(event: SlashCommandInteractionEvent) {
-        event.deferReply().queue()
-
         val guild = event.guild ?: return
         val playlistName = event.getOption("playlist")!!.asString.trim()
         val rawLink = event.getOption("link")!!.asString.trim()
+        val videoId = extractVideoIdFromLink(rawLink)
 
-        val query =
-            if (rawLink.startsWith("http")) {
-                rawLink
-            } else {
-                "ytsearch:$rawLink"
-            }
+        if (videoId == null) {
+            event.reply("Video ID not found. Use YouTube link.").queue()
+            return
+        }
 
         val box = playlistBoxes.getOrPut(guild.idLong) {
             PlaylistBox()
         }
 
-        val link = lavalinkClient.getOrCreateLink(guild.idLong)
+        val title = "https://www.youtube.com/watch?v=$videoId"
 
-        link.loadItem(query).subscribe { result ->
-            val track =
-                when (result) {
-                    is TrackLoaded -> result.track
-                    is SearchResult -> result.tracks.firstOrNull()
-                    is PlaylistLoaded -> result.tracks.firstOrNull()
-                    else -> null
-                }
+        val added =
+            box.addTrack(
+                playlistName,
+                videoId,
+                title
+            )
 
-            if (track == null) {
-                event.hook.sendMessage("No track found.").queue()
-                return@subscribe
-            }
-
-            val added = box.addTrack(playlistName, track)
-
-            if (!added) {
-                event.hook.sendMessage("Playlist not found: $playlistName").queue()
-                return@subscribe
-            }
-
-            event.hook.sendMessage(
-                "Added to $playlistName: ${track.info.title}"
-            ).queue()
+        if (!added) {
+            event.reply("Playlist not found: $playlistName").queue()
+            return
         }
+
+        event.reply("Added to $playlistName: $title").queue()
     }
 
     private fun startBox(event: SlashCommandInteractionEvent) {
@@ -510,9 +587,9 @@ class BotCommands : ListenerAdapter() {
             return
         }
 
-        val track = box.next()
+        val boxTrack = box.next()
 
-        if (track == null) {
+        if (boxTrack == null) {
             event.hook.sendMessage("No tracks available in box.").queue()
             return
         }
@@ -521,20 +598,11 @@ class BotCommands : ListenerAdapter() {
             event.jda.directAudioController.connect(channel)
         }
 
-        val link = lavalinkClient.getOrCreateLink(guild.idLong)
-        val player = link.createOrUpdatePlayer()
+        playBoxTrack(guild.idLong, boxTrack)
 
-        player.setVolume(100)
-        player.setPaused(false)
-
-        player.setTrack(track).subscribe {
-            activePlayers.add(guild.idLong)
-            currentTracks[guild.idLong] = track.info.title
-
-            event.hook.sendMessage(
-                "Box started. Now playing: ${track.info.title}"
-            ).queue()
-        }
+        event.hook.sendMessage(
+            "Box started."
+        ).queue()
     }
 
     private fun boxStatus(event: SlashCommandInteractionEvent) {
@@ -615,10 +683,224 @@ class BotCommands : ListenerAdapter() {
             return
         }
 
-        val message = preview.mapIndexed { index, item ->
-            "${index + 1}. $item"
-        }.joinToString("\n")
+        val message =
+            preview.mapIndexed { index, item ->
+                "${index + 1}. $item"
+            }.joinToString("\n")
 
         event.reply("Upcoming box tracks:\n$message").queue()
+    }
+
+    private fun testPlaylistId(event: SlashCommandInteractionEvent) {
+        val link = event.getOption("link")!!.asString
+        val playlistId = extractPlaylistId(link)
+
+        if (playlistId == null) {
+            event.reply("Playlist ID not found.").queue()
+            return
+        }
+
+        event.reply("Playlist ID: $playlistId").queue()
+    }
+
+    private fun testPlaylistUrl(event: SlashCommandInteractionEvent) {
+        val link = event.getOption("link")!!.asString
+        val playlistId = extractPlaylistId(link)
+
+        if (playlistId == null) {
+            event.reply("Playlist ID not found.").queue()
+            return
+        }
+
+        val url = buildPlaylistUrl(playlistId)
+
+        event.reply(url).queue()
+    }
+
+    private fun testPlaylistLoad(event: SlashCommandInteractionEvent) {
+        event.deferReply().queue()
+
+        val raw = event.getOption("link")!!.asString
+        val playlistId = extractPlaylistId(raw)
+
+        if (playlistId == null) {
+            event.hook.sendMessage("Playlist ID not found.").queue()
+            return
+        }
+
+        val url = buildPlaylistUrl(playlistId)
+        val guild = event.guild ?: return
+        val link = lavalinkClient.getOrCreateLink(guild.idLong)
+
+        link.loadItem(url).subscribe { result ->
+            when (result) {
+                is PlaylistLoaded -> {
+                    event.hook.sendMessage(
+                        """
+                        Loaded playlist
+                        
+                        Name: ${result.info.name}
+                        Tracks: ${result.tracks.size}
+                        First: ${result.tracks.firstOrNull()?.info?.title}
+                        """.trimIndent()
+                    ).queue()
+                }
+
+                is LoadFailed -> {
+                    event.hook.sendMessage(
+                        """
+                        Load failed
+                        
+                        Message: ${result.exception.message}
+                        Severity: ${result.exception.severity}
+                        """.trimIndent()
+                    ).queue()
+                }
+
+                else -> {
+                    event.hook.sendMessage(
+                        "Result: ${result::class.simpleName}"
+                    ).queue()
+                }
+            }
+        }
+    }
+
+    private fun testVideoIds(event: SlashCommandInteractionEvent) {
+        event.deferReply().queue()
+
+        val raw = event.getOption("link")!!.asString
+        val playlistId = extractPlaylistId(raw)
+
+        if (playlistId == null) {
+            event.hook.sendMessage("Playlist ID not found.").queue()
+            return
+        }
+
+        val playlistUrl = buildPlaylistUrl(playlistId)
+        val videoIds = loadPlaylistVideoIds(playlistUrl)
+
+        if (videoIds.isEmpty()) {
+            event.hook.sendMessage("No video IDs found.").queue()
+            return
+        }
+
+        val message = videoIds
+                .take(10)
+                .joinToString("\n")
+
+        event.hook.sendMessage("Found ${videoIds.size} video IDs:\n$message").queue()
+    }
+
+    private fun addPlaylist(event: SlashCommandInteractionEvent) {
+        event.deferReply().queue()
+
+        val guild = event.guild ?: return
+        val playlistName = event.getOption("name")!!.asString.trim()
+        val rawLink = event.getOption("link")!!.asString.trim()
+
+        val playlistId = extractPlaylistId(rawLink)
+
+        if (playlistId == null) {
+            event.hook.sendMessage("Playlist ID not found.").queue()
+            return
+        }
+
+        val playlistUrl = buildPlaylistUrl(playlistId)
+        val tracks = loadPlaylistTracks(playlistUrl)
+
+        if (tracks.isEmpty()) {
+            event.hook.sendMessage("No tracks found.").queue()
+            return
+        }
+
+        val box = playlistBoxes.getOrPut(guild.idLong) {
+            PlaylistBox()
+        }
+
+        val created = box.createPlaylist(playlistName)
+
+        if (!created) {
+            event.hook.sendMessage("Playlist already exists: $playlistName").queue()
+            return
+        }
+
+        tracks.forEach { track ->
+            box.addTrack(
+                playlistName,
+                track.videoId,
+                track.title
+            )
+        }
+
+        event.hook.sendMessage(
+            """
+            Playlist added: $playlistName
+            
+            Added: ${tracks.size} tracks
+            """.trimIndent()
+        ).queue()
+    }
+
+    private fun testTrack(event: SlashCommandInteractionEvent) {
+        event.deferReply().queue()
+
+        val guild = event.guild ?: return
+        val id = event.getOption("id")!!.asString
+        val url = loadDirectAudioUrl(id)
+
+        if (url == null) {
+            event.hook.sendMessage("Direct audio URL not found.").queue()
+            return
+        }
+
+        val link = lavalinkClient.getOrCreateLink(guild.idLong)
+
+        link.loadItem(url).subscribe { result ->
+            when (result) {
+                is TrackLoaded -> {
+                    event.hook.sendMessage(
+                        "TrackLoaded: ${result.track.info.title}"
+                    ).queue()
+                }
+
+                is LoadFailed -> {
+                    event.hook.sendMessage(
+                        """
+                        LoadFailed
+                        
+                        Message: ${result.exception.message}
+                        Severity: ${result.exception.severity}
+                        """.trimIndent()
+                    ).queue()
+                }
+
+                else -> {
+                    event.hook.sendMessage(
+                        "Result: ${result::class.simpleName}"
+                    ).queue()
+                }
+            }
+        }
+    }
+
+    private fun shufflePlaylist(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val name = event.getOption("name")!!.asString.trim()
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        val shuffled = box.shufflePlaylist(name)
+
+        if (!shuffled) {
+            event.reply("Playlist not found: $name").queue()
+            return
+        }
+
+        event.reply("Playlist shuffled: $name").queue()
     }
 }

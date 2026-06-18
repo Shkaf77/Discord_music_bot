@@ -54,3 +54,6 @@ bin/
 lavalink/Lavalink.jar
 lavalink/plugins/
 lavalink/application.yml
+
+### Cookies ###
+cookies.txt

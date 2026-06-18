@@ -1,7 +1,10 @@
-import dev.arbjerg.lavalink.client.player.Track
+data class BoxTrack(
+    val videoId: String,
+    val title: String
+)
 
 class PlaylistBox {
-    private val playlists = mutableMapOf<String, MutableList<Track>>()
+    private val playlists = mutableMapOf<String, MutableList<BoxTrack>>()
     private val playlistOrder = mutableListOf<String>()
     private var currentPlaylist = 0
 
@@ -16,15 +19,20 @@ class PlaylistBox {
         return true
     }
 
-    fun addTrack(playlistName: String, track: Track): Boolean {
+    fun addTrack(playlistName: String, videoId: String, title: String): Boolean {
         val playlist = playlists[playlistName] ?: return false
 
-        playlist.add(track)
+        playlist.add(
+            BoxTrack(
+                videoId,
+                title
+            )
+        )
 
         return true
     }
 
-    fun next(): Track? {
+    fun next(): BoxTrack? {
         if (playlistOrder.isEmpty()) {
             return null
         }
@@ -53,39 +61,11 @@ class PlaylistBox {
         return null
     }
 
-    fun listPlaylists(): List<String> {
-        return playlistOrder.map { name ->
-            val size = playlists[name]?.size ?: 0
-            "$name ($size tracks)"
-        }
-    }
-
-    fun clear() {
-        playlists.clear()
-        playlistOrder.clear()
-        currentPlaylist = 0
-    }
-
     fun status(): List<String> {
         return playlistOrder.map { name ->
             val size = playlists[name]?.size ?: 0
             "$name ($size tracks)"
         }
-    }
-
-    fun removePlaylist(name: String): Boolean {
-        if (!playlists.containsKey(name)) {
-            return false
-        }
-
-        playlists.remove(name)
-        playlistOrder.remove(name)
-
-        if (currentPlaylist >= playlistOrder.size) {
-            currentPlaylist = 0
-        }
-
-        return true
     }
 
     fun preview(limit: Int): List<String> {
@@ -115,7 +95,7 @@ class PlaylistBox {
 
             if (playlist != null && trackIndex < playlist.size) {
                 val track = playlist[trackIndex]
-                result.add("$playlistName: ${track.info.title}")
+                result.add("$playlistName: ${track.title}")
                 positions[playlistName] = trackIndex + 1
                 attemptsWithoutTrack = 0
             } else {
@@ -126,5 +106,34 @@ class PlaylistBox {
         }
 
         return result
+    }
+
+    fun removePlaylist(name: String): Boolean {
+        if (!playlists.containsKey(name)) {
+            return false
+        }
+
+        playlists.remove(name)
+        playlistOrder.remove(name)
+
+        if (currentPlaylist >= playlistOrder.size) {
+            currentPlaylist = 0
+        }
+
+        return true
+    }
+
+    fun clear() {
+        playlists.clear()
+        playlistOrder.clear()
+        currentPlaylist = 0
+    }
+
+    fun shufflePlaylist(name: String): Boolean {
+        val playlist = playlists[name] ?: return false
+
+        playlist.shuffle()
+
+        return true
     }
 }
