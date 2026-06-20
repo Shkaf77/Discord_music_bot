@@ -1,6 +1,5 @@
 import dev.arbjerg.lavalink.client.LavalinkClient
 import dev.arbjerg.lavalink.client.NodeOptions
-import dev.arbjerg.lavalink.client.player.LoadFailed
 import dev.arbjerg.lavalink.client.player.PlaylistLoaded
 import dev.arbjerg.lavalink.client.player.SearchResult
 import dev.arbjerg.lavalink.client.player.TrackLoaded
@@ -217,38 +216,6 @@ fun main() {
 
             Commands.slash("boxqueue", "Show upcoming tracks from box"),
 
-            Commands.slash("testplaylistid", "Test playlist id extraction")
-                .addOption(
-                    OptionType.STRING,
-                    "link",
-                    "Playlist link",
-                    true
-                ),
-
-            Commands.slash("testplaylisturl", "Build playlist url")
-                .addOption(
-                    OptionType.STRING,
-                    "link",
-                    "Playlist link",
-                    true
-                ),
-
-            Commands.slash("testplaylistload", "Load playlist through lavalink")
-                .addOption(
-                    OptionType.STRING,
-                    "link",
-                    "Playlist link",
-                    true
-                ),
-
-            Commands.slash("testvideoids", "Extract video ids from playlist")
-                .addOption(
-                    OptionType.STRING,
-                    "link",
-                    "Playlist link",
-                    true
-                ),
-
             Commands.slash("addplaylist", "Add full playlist to box")
                 .addOption(
                     OptionType.STRING,
@@ -260,14 +227,6 @@ fun main() {
                     OptionType.STRING,
                     "link",
                     "YouTube or YouTube Music playlist link",
-                    true
-                ),
-
-            Commands.slash("testtrack", "Test track direct audio")
-                .addOption(
-                    OptionType.STRING,
-                    "id",
-                    "Video id",
                     true
                 ),
 
@@ -320,12 +279,7 @@ class BotCommands : ListenerAdapter() {
             "stopbox" -> stopBox(event)
             "removeplaylist" -> removePlaylist(event)
             "boxqueue" -> boxQueue(event)
-            "testplaylistid" -> testPlaylistId(event)
-            "testplaylisturl" -> testPlaylistUrl(event)
-            "testplaylistload" -> testPlaylistLoad(event)
-            "testvideoids" -> testVideoIds(event)
             "addplaylist" -> addPlaylist(event)
-            "testtrack" -> testTrack(event)
             "shuffleplaylist" -> shufflePlaylist(event)
             "help" -> help(event)
         }
@@ -698,107 +652,6 @@ class BotCommands : ListenerAdapter() {
         event.reply("Upcoming box tracks:\n$message").queue()
     }
 
-    private fun testPlaylistId(event: SlashCommandInteractionEvent) {
-        val link = event.getOption("link")!!.asString
-        val playlistId = extractPlaylistId(link)
-
-        if (playlistId == null) {
-            event.reply("Playlist ID not found.").queue()
-            return
-        }
-
-        event.reply("Playlist ID: $playlistId").queue()
-    }
-
-    private fun testPlaylistUrl(event: SlashCommandInteractionEvent) {
-        val link = event.getOption("link")!!.asString
-        val playlistId = extractPlaylistId(link)
-
-        if (playlistId == null) {
-            event.reply("Playlist ID not found.").queue()
-            return
-        }
-
-        val url = buildPlaylistUrl(playlistId)
-
-        event.reply(url).queue()
-    }
-
-    private fun testPlaylistLoad(event: SlashCommandInteractionEvent) {
-        event.deferReply().queue()
-
-        val raw = event.getOption("link")!!.asString
-        val playlistId = extractPlaylistId(raw)
-
-        if (playlistId == null) {
-            event.hook.sendMessage("Playlist ID not found.").queue()
-            return
-        }
-
-        val url = buildPlaylistUrl(playlistId)
-        val guild = event.guild ?: return
-        val link = lavalinkClient.getOrCreateLink(guild.idLong)
-
-        link.loadItem(url).subscribe { result ->
-            when (result) {
-                is PlaylistLoaded -> {
-                    event.hook.sendMessage(
-                        """
-                        Loaded playlist
-                        
-                        Name: ${result.info.name}
-                        Tracks: ${result.tracks.size}
-                        First: ${result.tracks.firstOrNull()?.info?.title}
-                        """.trimIndent()
-                    ).queue()
-                }
-
-                is LoadFailed -> {
-                    event.hook.sendMessage(
-                        """
-                        Load failed
-                        
-                        Message: ${result.exception.message}
-                        Severity: ${result.exception.severity}
-                        """.trimIndent()
-                    ).queue()
-                }
-
-                else -> {
-                    event.hook.sendMessage(
-                        "Result: ${result::class.simpleName}"
-                    ).queue()
-                }
-            }
-        }
-    }
-
-    private fun testVideoIds(event: SlashCommandInteractionEvent) {
-        event.deferReply().queue()
-
-        val raw = event.getOption("link")!!.asString
-        val playlistId = extractPlaylistId(raw)
-
-        if (playlistId == null) {
-            event.hook.sendMessage("Playlist ID not found.").queue()
-            return
-        }
-
-        val playlistUrl = buildPlaylistUrl(playlistId)
-        val videoIds = loadPlaylistVideoIds(playlistUrl)
-
-        if (videoIds.isEmpty()) {
-            event.hook.sendMessage("No video IDs found.").queue()
-            return
-        }
-
-        val message = videoIds
-                .take(10)
-                .joinToString("\n")
-
-        event.hook.sendMessage("Found ${videoIds.size} video IDs:\n$message").queue()
-    }
-
     private fun addPlaylist(event: SlashCommandInteractionEvent) {
         event.deferReply().queue()
 
@@ -847,48 +700,6 @@ class BotCommands : ListenerAdapter() {
             Added: ${tracks.size} tracks
             """.trimIndent()
         ).queue()
-    }
-
-    private fun testTrack(event: SlashCommandInteractionEvent) {
-        event.deferReply().queue()
-
-        val guild = event.guild ?: return
-        val id = event.getOption("id")!!.asString
-        val url = loadDirectAudioUrl(id)
-
-        if (url == null) {
-            event.hook.sendMessage("Direct audio URL not found.").queue()
-            return
-        }
-
-        val link = lavalinkClient.getOrCreateLink(guild.idLong)
-
-        link.loadItem(url).subscribe { result ->
-            when (result) {
-                is TrackLoaded -> {
-                    event.hook.sendMessage(
-                        "TrackLoaded: ${result.track.info.title}"
-                    ).queue()
-                }
-
-                is LoadFailed -> {
-                    event.hook.sendMessage(
-                        """
-                        LoadFailed
-                        
-                        Message: ${result.exception.message}
-                        Severity: ${result.exception.severity}
-                        """.trimIndent()
-                    ).queue()
-                }
-
-                else -> {
-                    event.hook.sendMessage(
-                        "Result: ${result::class.simpleName}"
-                    ).queue()
-                }
-            }
-        }
     }
 
     private fun shufflePlaylist(event: SlashCommandInteractionEvent) {
