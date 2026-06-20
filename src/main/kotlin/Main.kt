@@ -1,5 +1,7 @@
 import dev.arbjerg.lavalink.client.LavalinkClient
 import dev.arbjerg.lavalink.client.NodeOptions
+import dev.arbjerg.lavalink.client.event.TrackEndEvent
+import dev.arbjerg.lavalink.client.player.LoadFailed
 import dev.arbjerg.lavalink.client.player.PlaylistLoaded
 import dev.arbjerg.lavalink.client.player.SearchResult
 import dev.arbjerg.lavalink.client.player.TrackLoaded
@@ -11,7 +13,6 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.interactions.commands.OptionType
 import net.dv8tion.jda.api.interactions.commands.build.Commands
 import net.dv8tion.jda.api.requests.GatewayIntent
-import dev.arbjerg.lavalink.client.event.TrackEndEvent
 
 lateinit var lavalinkClient: LavalinkClient
 val musicQueues = mutableMapOf<Long, MusicQueue>()
@@ -60,7 +61,6 @@ fun playBoxTrack(guildId: Long, boxTrack: BoxTrack) {
     val player = link.createOrUpdatePlayer()
 
     link.loadItem(directUrl).subscribe { result ->
-
         val loaded =
             when (result) {
                 is TrackLoaded -> result.track
@@ -162,6 +162,8 @@ fun main() {
 
             Commands.slash("queue", "Show current queue"),
 
+            Commands.slash("clearqueue", "Clear normal queue"),
+
             Commands.slash("skip", "Skip current track"),
 
             Commands.slash("pause", "Pause current track"),
@@ -200,22 +202,6 @@ fun main() {
                     true
                 ),
 
-            Commands.slash("startbox", "Start round-robin box playback"),
-
-            Commands.slash("boxstatus", "Show playlist box status"),
-
-            Commands.slash("stopbox", "Stop and clear playlist box"),
-
-            Commands.slash("removeplaylist", "Remove playlist from box")
-                .addOption(
-                    OptionType.STRING,
-                    "name",
-                    "Playlist name",
-                    true
-                ),
-
-            Commands.slash("boxqueue", "Show upcoming tracks from box"),
-
             Commands.slash("addplaylist", "Add full playlist to box")
                 .addOption(
                     OptionType.STRING,
@@ -230,6 +216,12 @@ fun main() {
                     true
                 ),
 
+            Commands.slash("startbox", "Start round-robin box playback"),
+
+            Commands.slash("boxstatus", "Show playlist box status"),
+
+            Commands.slash("boxqueue", "Show upcoming tracks from box"),
+
             Commands.slash("shuffleplaylist", "Shuffle playlist inside the box")
                 .addOption(
                     OptionType.STRING,
@@ -237,6 +229,16 @@ fun main() {
                     "Playlist name",
                     true
                 ),
+
+            Commands.slash("removeplaylist", "Remove playlist from box")
+                .addOption(
+                    OptionType.STRING,
+                    "name",
+                    "Playlist name",
+                    true
+                ),
+
+            Commands.slash("stopbox", "Stop and clear playlist box"),
 
             Commands.slash("join", "Join your voice channel"),
 
@@ -267,6 +269,7 @@ class BotCommands : ListenerAdapter() {
             "leave" -> leave(event)
             "play" -> play(event)
             "queue" -> showQueue(event)
+            "clearqueue" -> clearQueue(event)
             "skip" -> skip(event)
             "pause" -> pause(event)
             "resume" -> resume(event)
@@ -274,13 +277,13 @@ class BotCommands : ListenerAdapter() {
             "nowplaying" -> nowPlaying(event)
             "createplaylist" -> createPlaylist(event)
             "addboxtrack" -> addBoxTrack(event)
+            "addplaylist" -> addPlaylist(event)
             "startbox" -> startBox(event)
             "boxstatus" -> boxStatus(event)
-            "stopbox" -> stopBox(event)
-            "removeplaylist" -> removePlaylist(event)
             "boxqueue" -> boxQueue(event)
-            "addplaylist" -> addPlaylist(event)
             "shuffleplaylist" -> shufflePlaylist(event)
+            "removeplaylist" -> removePlaylist(event)
+            "stopbox" -> stopBox(event)
             "help" -> help(event)
         }
     }
@@ -321,7 +324,7 @@ class BotCommands : ListenerAdapter() {
             event.jda.directAudioController.connect(channel)
         }
 
-        val raw = event.getOption("query")!!.asString
+        val raw = event.getOption("query")!!.asString.trim()
 
         val query =
             if (raw.startsWith("http")) {
@@ -338,6 +341,18 @@ class BotCommands : ListenerAdapter() {
                     is TrackLoaded -> result.track
                     is SearchResult -> result.tracks.firstOrNull()
                     is PlaylistLoaded -> result.tracks.firstOrNull()
+
+                    is LoadFailed -> {
+                        event.hook.sendMessage(
+                            """
+                            Could not load this track.
+                            Try using a search query instead of a direct link.
+                            """.trimIndent()
+                        ).queue()
+
+                        return@subscribe
+                    }
+
                     else -> null
                 }
 
@@ -379,7 +394,7 @@ class BotCommands : ListenerAdapter() {
         val guild = event.guild ?: return
         val queue = musicQueues[guild.idLong]
 
-        if (queue == null) {
+        if (queue == null || queue.list().isEmpty()) {
             event.reply("Queue is empty.").queue()
             return
         }
@@ -392,7 +407,21 @@ class BotCommands : ListenerAdapter() {
                 }
                 .joinToString("\n")
 
-        event.reply("Current queue: \n$message").queue()
+        event.reply("Current queue:\n$message").queue()
+    }
+
+    private fun clearQueue(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val queue = musicQueues[guild.idLong]
+
+        if (queue == null || queue.list().isEmpty()) {
+            event.reply("Queue is already empty.").queue()
+            return
+        }
+
+        queue.clear()
+
+        event.reply("Queue cleared.").queue()
     }
 
     private fun skip(event: SlashCommandInteractionEvent) {
@@ -416,7 +445,7 @@ class BotCommands : ListenerAdapter() {
             currentTracks.remove(guild.idLong)
 
             player.setTrack(null).subscribe {
-                event.reply("Skipped. Queue is empty").queue()
+                event.reply("Skipped. Queue is empty.").queue()
             }
 
             return
@@ -530,128 +559,6 @@ class BotCommands : ListenerAdapter() {
         event.reply("Added to $playlistName: $title").queue()
     }
 
-    private fun startBox(event: SlashCommandInteractionEvent) {
-        event.deferReply().queue()
-
-        val guild = event.guild ?: return
-        val channel = event.member?.voiceState?.channel
-
-        if (channel == null) {
-            event.hook.sendMessage("Join voice channel first.").queue()
-            return
-        }
-
-        val box = playlistBoxes[guild.idLong]
-
-        if (box == null) {
-            event.hook.sendMessage("Box is empty.").queue()
-            return
-        }
-
-        val boxTrack = box.next()
-
-        if (boxTrack == null) {
-            event.hook.sendMessage("No tracks available in box.").queue()
-            return
-        }
-
-        if (!guild.selfMember.voiceState!!.inAudioChannel()) {
-            event.jda.directAudioController.connect(channel)
-        }
-
-        playBoxTrack(guild.idLong, boxTrack)
-
-        event.hook.sendMessage(
-            "Box started."
-        ).queue()
-    }
-
-    private fun boxStatus(event: SlashCommandInteractionEvent) {
-        val guild = event.guild ?: return
-        val box = playlistBoxes[guild.idLong]
-
-        if (box == null) {
-            event.reply("Box is empty.").queue()
-            return
-        }
-
-        val status = box.status()
-
-        if (status.isEmpty()) {
-            event.reply("Box is empty.").queue()
-            return
-        }
-
-        event.reply("Box status:\n${status.joinToString("\n")}").queue()
-    }
-
-    private fun stopBox(event: SlashCommandInteractionEvent) {
-        val guild = event.guild ?: return
-        val box = playlistBoxes[guild.idLong]
-
-        if (box == null) {
-            event.reply("Box is already empty.").queue()
-            return
-        }
-
-        box.clear()
-        playlistBoxes.remove(guild.idLong)
-        activePlayers.remove(guild.idLong)
-        currentTracks.remove(guild.idLong)
-
-        val player = lavalinkClient
-            .getOrCreateLink(guild.idLong)
-            .createOrUpdatePlayer()
-
-        player.setTrack(null).subscribe {
-            event.reply("Box stopped and cleared.").queue()
-        }
-    }
-
-    private fun removePlaylist(event: SlashCommandInteractionEvent) {
-        val guild = event.guild ?: return
-        val name = event.getOption("name")!!.asString
-        val box = playlistBoxes[guild.idLong]
-
-        if (box == null) {
-            event.reply("Box is empty.").queue()
-            return
-        }
-
-        val removed = box.removePlaylist(name)
-
-        if (!removed) {
-            event.reply("Playlist not found.").queue()
-            return
-        }
-
-        event.reply("Removed playlist: $name").queue()
-    }
-
-    private fun boxQueue(event: SlashCommandInteractionEvent) {
-        val guild = event.guild ?: return
-        val box = playlistBoxes[guild.idLong]
-
-        if (box == null) {
-            event.reply("Box is empty.").queue()
-            return
-        }
-
-        val preview = box.preview(10)
-
-        if (preview.isEmpty()) {
-            event.reply("Box queue is empty.").queue()
-            return
-        }
-
-        val message =
-            preview.mapIndexed { index, item ->
-                "${index + 1}. $item"
-            }.joinToString("\n")
-
-        event.reply("Upcoming box tracks:\n$message").queue()
-    }
-
     private fun addPlaylist(event: SlashCommandInteractionEvent) {
         event.deferReply().queue()
 
@@ -702,6 +609,83 @@ class BotCommands : ListenerAdapter() {
         ).queue()
     }
 
+    private fun startBox(event: SlashCommandInteractionEvent) {
+        event.deferReply().queue()
+
+        val guild = event.guild ?: return
+        val channel = event.member?.voiceState?.channel
+
+        if (channel == null) {
+            event.hook.sendMessage("Join voice channel first.").queue()
+            return
+        }
+
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.hook.sendMessage("Box is empty.").queue()
+            return
+        }
+
+        val boxTrack = box.next()
+
+        if (boxTrack == null) {
+            event.hook.sendMessage("No tracks available in box.").queue()
+            return
+        }
+
+        if (!guild.selfMember.voiceState!!.inAudioChannel()) {
+            event.jda.directAudioController.connect(channel)
+        }
+
+        playBoxTrack(guild.idLong, boxTrack)
+
+        event.hook.sendMessage("Box started.").queue()
+    }
+
+    private fun boxStatus(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        val status = box.status()
+
+        if (status.isEmpty()) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        event.reply("Box status:\n${status.joinToString("\n")}").queue()
+    }
+
+    private fun boxQueue(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        val preview = box.preview(10)
+
+        if (preview.isEmpty()) {
+            event.reply("Box queue is empty.").queue()
+            return
+        }
+
+        val message =
+            preview.mapIndexed { index, item ->
+                "${index + 1}. $item"
+            }.joinToString("\n")
+
+        event.reply("Upcoming box tracks:\n$message").queue()
+    }
+
     private fun shufflePlaylist(event: SlashCommandInteractionEvent) {
         val guild = event.guild ?: return
         val name = event.getOption("name")!!.asString.trim()
@@ -722,6 +706,49 @@ class BotCommands : ListenerAdapter() {
         event.reply("Playlist shuffled: $name").queue()
     }
 
+    private fun removePlaylist(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val name = event.getOption("name")!!.asString.trim()
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is empty.").queue()
+            return
+        }
+
+        val removed = box.removePlaylist(name)
+
+        if (!removed) {
+            event.reply("Playlist not found: $name").queue()
+            return
+        }
+
+        event.reply("Removed playlist: $name").queue()
+    }
+
+    private fun stopBox(event: SlashCommandInteractionEvent) {
+        val guild = event.guild ?: return
+        val box = playlistBoxes[guild.idLong]
+
+        if (box == null) {
+            event.reply("Box is already empty.").queue()
+            return
+        }
+
+        box.clear()
+        playlistBoxes.remove(guild.idLong)
+        activePlayers.remove(guild.idLong)
+        currentTracks.remove(guild.idLong)
+
+        val player = lavalinkClient
+            .getOrCreateLink(guild.idLong)
+            .createOrUpdatePlayer()
+
+        player.setTrack(null).subscribe {
+            event.reply("Box stopped and cleared.").queue()
+        }
+    }
+
     private fun help(event: SlashCommandInteractionEvent) {
         event.reply(
             """
@@ -732,6 +759,7 @@ class BotCommands : ListenerAdapter() {
             /leave - leave voice channel
             /play - play YouTube track or search query
             /queue - show normal queue
+            /clearqueue - clear normal queue
             /skip - skip current track
             /pause - pause playback
             /resume - resume playback

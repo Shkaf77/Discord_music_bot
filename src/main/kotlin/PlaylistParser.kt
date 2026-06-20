@@ -1,3 +1,5 @@
+import java.io.File
+
 fun extractPlaylistId(link: String): String? {
     val trimmed = link.trim()
 
@@ -18,51 +20,38 @@ fun buildPlaylistUrl(playlistId: String): String {
     return "https://www.youtube.com/playlist?list=$playlistId"
 }
 
-fun loadPlaylistVideoIds(playlistUrl: String): List<String> {
-    val process =
-        ProcessBuilder(
-            "yt-dlp",
+fun ytDlpCookieArgs(): List<String> {
+    return if (File("cookies.txt").exists()) {
+        listOf(
             "--cookies",
-            "cookies.txt",
-            "--flat-playlist",
-            "--print",
-            "%(id)s",
-            playlistUrl
+            "cookies.txt"
         )
-            .redirectErrorStream(true)
-            .start()
-
-    val output =
-        process
-            .inputStream
-            .bufferedReader()
-            .readLines()
-
-    val exitCode =
-        process.waitFor()
-
-    if (exitCode != 0) {
-        return emptyList()
+    } else {
+        emptyList()
     }
-
-    return output
-        .map { it.trim() }
-        .filter { it.isNotBlank() && !it.startsWith("[") && !it.startsWith("WARNING") }
 }
 
 fun loadDirectAudioUrl(videoId: String): String? {
     val videoUrl = "https://www.youtube.com/watch?v=$videoId"
 
-    val process =
-        ProcessBuilder(
-            "yt-dlp",
-            "--cookies",
-            "cookies.txt",
+    val command =
+        mutableListOf(
+            "yt-dlp"
+        )
+
+    command.addAll(ytDlpCookieArgs())
+
+    command.addAll(
+        listOf(
             "-f",
             "ba",
             "-g",
             videoUrl
         )
+    )
+
+    val process =
+        ProcessBuilder(command)
             .redirectErrorStream(true)
             .start()
 
@@ -85,14 +74,24 @@ fun loadDirectAudioUrl(videoId: String): String? {
 }
 
 fun loadPlaylistTracks(playlistUrl: String): List<BoxTrack> {
-    val process =
-        ProcessBuilder(
-            "yt-dlp",
+    val command =
+        mutableListOf(
+            "yt-dlp"
+        )
+
+    command.addAll(ytDlpCookieArgs())
+
+    command.addAll(
+        listOf(
             "--flat-playlist",
             "--print",
             "%(id)s|||%(title)s",
             playlistUrl
         )
+    )
+
+    val process =
+        ProcessBuilder(command)
             .redirectErrorStream(true)
             .start()
 
@@ -113,7 +112,11 @@ fun loadPlaylistTracks(playlistUrl: String): List<BoxTrack> {
         .map { it.trim() }
         .filter { it.contains("|||") }
         .mapNotNull { line ->
-            val parts = line.split("|||", limit = 2)
+            val parts =
+                line.split(
+                    "|||",
+                    limit = 2
+                )
 
             if (parts.size != 2) {
                 null
