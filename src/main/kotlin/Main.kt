@@ -116,6 +116,10 @@ fun main() {
     )
 
     lavalinkClient.on(TrackEndEvent::class.java).subscribe { event ->
+        if (!event.endReason.mayStartNext) {
+            return@subscribe
+        }
+
         val box = playlistBoxes[event.guildId]
         val boxTrack = box?.next()
 
@@ -284,7 +288,9 @@ fun main() {
                 "query",
                 "YouTube link or search",
                 true
-            )
+            ),
+
+            Commands.slash("help", "Show bot commands and usage")
         ).queue()
     }
 
@@ -321,6 +327,7 @@ class BotCommands : ListenerAdapter() {
             "addplaylist" -> addPlaylist(event)
             "testtrack" -> testTrack(event)
             "shuffleplaylist" -> shufflePlaylist(event)
+            "help" -> help(event)
         }
     }
 
@@ -902,5 +909,35 @@ class BotCommands : ListenerAdapter() {
         }
 
         event.reply("Playlist shuffled: $name").queue()
+    }
+
+    private fun help(event: SlashCommandInteractionEvent) {
+        event.reply(
+            """
+            Niroshi Music Bot commands:
+            
+            Basic:
+            /join - join your voice channel
+            /leave - leave voice channel
+            /play - play YouTube track or search query
+            /queue - show normal queue
+            /skip - skip current track
+            /pause - pause playback
+            /resume - resume playback
+            /volume - set volume
+            /nowplaying - show current track
+            
+            Playlist Box:
+            /createplaylist - create playlist inside box
+            /addboxtrack - add one track to playlist
+            /addplaylist - add full YouTube playlist
+            /startbox - start round-robin playback
+            /boxqueue - show upcoming box tracks
+            /boxstatus - show box playlists
+            /shuffleplaylist - shuffle playlist
+            /removeplaylist - remove playlist from box
+            /stopbox - stop and clear box
+            """.trimIndent()
+        ).setEphemeral(true).queue()
     }
 }
