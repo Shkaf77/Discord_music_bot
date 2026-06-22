@@ -120,10 +120,23 @@ DISCORD_BOT_ID=
 # Run Project
 
 ```bash
-# Start Lavalink
+# Create Lavalink folder
+mkdir lavalink
 cd lavalink
-java -jar Lavalink.jar
 
+# Download Lavalink.jar manually from:
+# https://github.com/lavalink-devs/Lavalink/releases
+
+# Create application.yml in the lavalink folder
+touch application.yml
+
+# Start Lavalink
+java -jar Lavalink.jar
+```
+
+In another terminal, from the project root:
+
+```bash
 # Start the bot
 ./gradlew run
 
