@@ -1,0 +1,21 @@
+services:
+  lavalink:
+    image: fredboat/lavalink:4
+    container_name: lavalink
+    ports:
+      - "2333:2333"
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: discord-music-bot
+    env_file:
+      - .env
+    environment:
+      LAVALINK_HOST: ws://lavalink:2333
+      LAVALINK_PASSWORD: youshallnotpass
+    depends_on:
+      - lavalink
+    restart: unless-stopped

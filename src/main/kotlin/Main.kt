@@ -94,7 +94,9 @@ fun playBoxTrack(guildId: Long, boxTrack: BoxTrack) {
 }
 
 fun main() {
-    val env = Dotenv.load()
+    val env =  Dotenv.configure()
+            .ignoreIfMissing()
+            .load()
 
     val discordToken =
         env["DISCORD_TOKEN"]
@@ -109,8 +111,14 @@ fun main() {
     lavalinkClient.addNode(
         NodeOptions.Builder()
             .setName("local")
-            .setServerUri("ws://localhost:2333")
-            .setPassword("youshallnotpass")
+            .setServerUri(
+                env["LAVALINK_HOST"]
+                    ?: error("LAVALINK_HOST is missing")
+            )
+            .setPassword(
+                env["LAVALINK_PASSWORD"]
+                    ?: error("LAVALINK_PASSWORD is missing")
+            )
             .build()
     )
 
@@ -638,9 +646,11 @@ class BotCommands : ListenerAdapter() {
             event.jda.directAudioController.connect(channel)
         }
 
-        playBoxTrack(guild.idLong, boxTrack)
+        event.hook.sendMessage("Box started. Loading first track...").queue()
 
-        event.hook.sendMessage("Box started.").queue()
+        Thread {
+            playBoxTrack(guild.idLong, boxTrack)
+        }.start()
     }
 
     private fun boxStatus(event: SlashCommandInteractionEvent) {

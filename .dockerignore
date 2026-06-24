@@ -1,0 +1,10 @@
+.gradle
+build
+.idea
+.kotlin
+.env
+.env.*
+!.env.example
+lavalink
+.DS_Store
+.git
